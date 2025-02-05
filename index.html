@@ -1,1 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Los Vaguitos Animation</title>
+  <style>
+    body {
+      margin: 0;
+      overflow: hidden;
+      background-color: #141414;
+    }
+  </style>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.4.0/p5.js"></script>
+  <script>
+    let snowflakes = [];
+    let textGraphics;
 
+    function setup() {
+      createCanvas(windowWidth, windowHeight);
+      textGraphics = createGraphics(width, height);
+      textGraphics.textAlign(CENTER, CENTER);
+      textGraphics.textSize(80); // Adjusted text size
+      textGraphics.noStroke();
+    }
+
+    function windowResized() {
+      resizeCanvas(windowWidth, windowHeight);
+    }
+
+    function draw() {
+      background(20);
+
+      // Create gradient text
+      textGraphics.clear();
+      for (let y = 0; y < textGraphics.height; y++) {
+        let inter = map(y, 0, textGraphics.height, 0, 1);
+        let c = lerpColor(color(255, 215, 0), color(218, 165, 32), inter);
+        textGraphics.fill(c);
+        textGraphics.text("Los Vaguitos", textGraphics.width / 2, textGraphics.height / 2);
+      }
+      image(textGraphics, 0, 0, width, height); // Resize text graphics to fit the canvas
+
+      // Generate and display snowflakes
+      for (let i = 0; i < random(1, 5); i++) {
+        snowflakes.push(new Snowflake());
+      }
+      for (let flake of snowflakes) {
+        flake.update();
+        flake.display();
+      }
+      snowflakes = snowflakes.filter(flake => !flake.isOffScreen());
+    }
+
+    class Snowflake {
+      constructor() {
+        this.posX = random(width);
+        this.posY = random(-50, 0);
+        this.size = random(2, 5);
+        this.speed = random(1, 3);
+        this.angle = random(TWO_PI);
+        this.deltaAngle = random(-0.01, 0.01);
+      }
+
+      update() {
+        this.posY += this.speed;
+        this.posX += sin(this.angle) * 2;
+        this.angle += this.deltaAngle;
+      }
+
+      display() {
+        push();
+        translate(this.posX, this.posY);
+        rotate(this.angle);
+        stroke(255);
+        strokeWeight(1);
+        for (let i = 0; i < 6; i++) {
+          line(0, 0, this.size, 0);
+          rotate(PI / 3);
+        }
+        pop();
+      }
+
+      isOffScreen() {
+        return this.posY > height + this.size;
+      }
+    }
+  </script>
+</head>
+<body>
+</body>
+</html>
