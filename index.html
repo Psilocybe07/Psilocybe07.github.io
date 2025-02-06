@@ -3,25 +3,35 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Los Vaguitos Animation</title>
+  <title>Los Vaguitos Matrix Animation</title>
   <style>
     body {
       margin: 0;
       overflow: hidden;
       background-color: #141414;
     }
+    @font-face {
+      font-family: 'SerifFont';
+      src: url('path/to/serif-font.woff2') format('woff2');
+    }
   </style>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.4.0/p5.js"></script>
   <script>
-    let snowflakes = [];
+    let matrixSymbols = [];
     let textGraphics;
+    let font;
 
     function setup() {
       createCanvas(windowWidth, windowHeight);
       textGraphics = createGraphics(width, height);
       textGraphics.textAlign(CENTER, CENTER);
-      textGraphics.textSize(80); // Adjusted text size
-      textGraphics.noStroke();
+      textGraphics.textSize(80);
+      textGraphics.textFont('Georgia'); // Set serif font
+
+      // Initialize matrix symbols
+      for (let i = 0; i < width / 20; i++) {
+        matrixSymbols.push(new MatrixSymbol(i * 20, random(-500, 0)));
+      }
     }
 
     function windowResized() {
@@ -30,6 +40,12 @@
 
     function draw() {
       background(20);
+
+      // Draw matrix symbols
+      for (let symbol of matrixSymbols) {
+        symbol.update();
+        symbol.display();
+      }
 
       // Create gradient text
       textGraphics.clear();
@@ -40,49 +56,28 @@
         textGraphics.text("Los Vaguitos", textGraphics.width / 2, textGraphics.height / 2);
       }
       image(textGraphics, 0, 0, width, height); // Resize text graphics to fit the canvas
-
-      // Generate and display snowflakes
-      for (let i = 0; i < random(1, 5); i++) {
-        snowflakes.push(new Snowflake());
-      }
-      for (let flake of snowflakes) {
-        flake.update();
-        flake.display();
-      }
-      snowflakes = snowflakes.filter(flake => !flake.isOffScreen());
     }
 
-    class Snowflake {
-      constructor() {
-        this.posX = random(width);
-        this.posY = random(-50, 0);
-        this.size = random(2, 5);
-        this.speed = random(1, 3);
-        this.angle = random(TWO_PI);
-        this.deltaAngle = random(-0.01, 0.01);
+    class MatrixSymbol {
+      constructor(x, y) {
+        this.x = x;
+        this.y = y;
+        this.value;
+        this.switchInterval = round(random(2, 20));
+        this.speed = random(2, 5);
       }
 
       update() {
-        this.posY += this.speed;
-        this.posX += sin(this.angle) * 2;
-        this.angle += this.deltaAngle;
+        if (frameCount % this.switchInterval === 0) {
+          this.value = String.fromCharCode(0x30A0 + round(random(0, 96)));
+        }
+        this.y = (this.y >= height) ? 0 : this.y += this.speed;
       }
 
       display() {
-        push();
-        translate(this.posX, this.posY);
-        rotate(this.angle);
-        stroke(255);
-        strokeWeight(1);
-        for (let i = 0; i < 6; i++) {
-          line(0, 0, this.size, 0);
-          rotate(PI / 3);
-        }
-        pop();
-      }
-
-      isOffScreen() {
-        return this.posY > height + this.size;
+        fill(0, 255, 70);
+        textSize(20);
+        text(this.value, this.x, this.y);
       }
     }
   </script>
