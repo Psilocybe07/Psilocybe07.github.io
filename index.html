@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>P2P Multiplayer Game</title>
+    <title>P2P Combat Game</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/phaser/3.70.0/phaser.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.5.2/peerjs.min.js"></script>
     <style>
@@ -19,6 +19,17 @@
         #playerList {
             position: absolute;
             top: 10px;
+            right: 10px;
+            background: rgba(0, 0, 0, 0.7);
+            color: white;
+            padding: 10px;
+            border-radius: 5px;
+            font-family: Arial, sans-serif;
+            min-width: 150px;
+        }
+        #ammoCount {
+            position: absolute;
+            bottom: 10px;
             right: 10px;
             background: rgba(0, 0, 0, 0.7);
             color: white;
@@ -45,7 +56,7 @@
 </head>
 <body>
     <div id="loginScreen">
-        <h2>Enter Game</h2>
+        <h2>Enter Combat</h2>
         <input type="text" id="playerName" placeholder="Enter your name" maxlength="15">
         <button onclick="startGame()">Join Game</button>
     </div>
@@ -53,6 +64,7 @@
         <h3>Players Online</h3>
         <div id="playerListContent"></div>
     </div>
+    <div id="ammoCount"></div>
     <div id="game"></div>
 
     <script>
@@ -101,17 +113,33 @@
         let localPlayer;
         let playerId;
         let playerNameText;
+        let bullets;
+        let ammoCount = 6;
+        let isReloading = false;
+        let lastShootTime = 0;
+        let keys;
 
         function preload() {
-            // Create colored circle for player
+            // Create player sprite
             const graphics = this.add.graphics();
+            graphics.lineStyle(2, 0xffffff);
             graphics.fillStyle(0xffffff);
-            graphics.fillCircle(25, 25, 25);
+            graphics.fillCircle(25, 25, 20);
+            graphics.strokeCircle(25, 25, 20);
             graphics.generateTexture('player', 50, 50);
+            
+            // Create bullet sprite
+            graphics.clear();
+            graphics.fillStyle(0xffffff);
+            graphics.fillCircle(4, 4, 4);
+            graphics.generateTexture('bullet', 8, 8);
             graphics.destroy();
         }
 
         function create() {
+            // Initialize bullets group
+            bullets = this.physics.add.group();
+            
             // Initialize PeerJS
             peer = new Peer();
             
@@ -119,55 +147,119 @@
                 playerId = id;
                 console.log('My peer ID is: ' + id);
                 
-                // Assign random color
                 const playerColor = playerColors[Math.floor(Math.random() * playerColors.length)];
                 
-                // Create local player
-                localPlayer = this.add.sprite(
+                // Create local player with physics
+                localPlayer = this.physics.add.sprite(
                     Math.random() * 700 + 50,
                     Math.random() * 500 + 50,
                     'player'
                 );
+                localPlayer.setCollideWorldBounds(true);
                 localPlayer.setTint(playerColor);
                 
-                // Add player name text
                 playerNameText = this.add.text(
                     localPlayer.x,
                     localPlayer.y - 40,
-                    playerName,
+                    `${playerName} (0)`,
                     { fontSize: '16px', fill: '#fff' }
                 );
 
                 players[playerId] = localPlayer;
                 playerInfo[playerId] = {
                     name: playerName,
-                    color: playerColor
+                    color: playerColor,
+                    score: 0
                 };
 
                 updatePlayerList();
+                updateAmmoCount();
 
-                // Handle new connections
                 peer.on('connection', (conn) => {
                     handleConnection(conn);
                 });
             });
 
-            // Join game by connecting to another peer
+            // Set up keyboard controls
+            keys = this.input.keyboard.addKeys({
+                up: 'W',
+                down: 'S',
+                left: 'A',
+                right: 'D',
+                reload: 'R'
+            });
+
+            // Handle mouse click for shooting
+            this.input.on('pointerdown', (pointer) => {
+                shoot(pointer);
+            });
+
+            // Join existing game
             const urlParams = new URLSearchParams(window.location.search);
             const joinId = urlParams.get('join');
             if (joinId) {
                 const conn = peer.connect(joinId);
                 handleConnection(conn);
             }
+        }
 
-            // Set up keyboard controls
-            this.cursors = this.input.keyboard.createCursorKeys();
+        function shoot(pointer) {
+            if (!localPlayer || ammoCount <= 0 || isReloading) return;
+            
+            const currentTime = Date.now();
+            if (currentTime - lastShootTime < 250) return; // Rate limiting
+            lastShootTime = currentTime;
+
+            const angle = Phaser.Math.Angle.Between(
+                localPlayer.x, localPlayer.y,
+                pointer.x, pointer.y
+            );
+
+            const bullet = bullets.create(localPlayer.x, localPlayer.y, 'bullet');
+            bullet.setTint(playerInfo[playerId].color);
+            bullet.owner = playerId;
+            
+            const speed = 500;
+            bullet.setVelocity(
+                Math.cos(angle) * speed,
+                Math.sin(angle) * speed
+            );
+
+            // Broadcast bullet creation
+            Object.values(connections).forEach(conn => {
+                conn.send({
+                    type: 'shoot',
+                    x: localPlayer.x,
+                    y: localPlayer.y,
+                    angle: angle,
+                    color: playerInfo[playerId].color,
+                    owner: playerId
+                });
+            });
+
+            ammoCount--;
+            updateAmmoCount();
+
+            // Destroy bullet after 1 second
+            setTimeout(() => {
+                bullet.destroy();
+            }, 1000);
+        }
+
+        function reload() {
+            if (isReloading || ammoCount === 6) return;
+            
+            isReloading = true;
+            setTimeout(() => {
+                ammoCount = 6;
+                isReloading = false;
+                updateAmmoCount();
+            }, 1500); // 1.5 second reload time
         }
 
         function handleConnection(conn) {
             connections[conn.peer] = conn;
             
-            // Send initial state
             conn.on('open', () => {
                 conn.send({
                     type: 'initial',
@@ -178,112 +270,194 @@
                 });
             });
 
-            // Handle incoming data
             conn.on('data', (data) => {
                 if (data.type === 'initial' || data.type === 'position') {
-                    // Create or update other player
-                    if (!players[conn.peer]) {
-                        players[conn.peer] = game.scene.scenes[0].add.sprite(
-                            data.x,
-                            data.y,
-                            'player'
-                        );
-                        playerInfo[conn.peer] = data.playerInfo;
-                        players[conn.peer].setTint(data.playerInfo.color);
-                        
-                        // Add name text for new player
-                        const nameText = game.scene.scenes[0].add.text(
-                            data.x,
-                            data.y - 40,
-                            data.playerInfo.name,
-                            { fontSize: '16px', fill: '#fff' }
-                        );
-                        players[conn.peer].nameText = nameText;
-                        
-                        updatePlayerList();
-                    } else {
-                        players[conn.peer].x = data.x;
-                        players[conn.peer].y = data.y;
-                        if (players[conn.peer].nameText) {
-                            players[conn.peer].nameText.x = data.x - players[conn.peer].nameText.width / 2;
-                            players[conn.peer].nameText.y = data.y - 40;
-                        }
-                    }
+                    handlePlayerUpdate(conn.peer, data);
+                } else if (data.type === 'shoot') {
+                    handleRemoteShot(data);
+                } else if (data.type === 'hit') {
+                    handleHit(data);
                 }
             });
 
-            // Handle disconnection
             conn.on('close', () => {
-                if (players[conn.peer]) {
-                    if (players[conn.peer].nameText) {
-                        players[conn.peer].nameText.destroy();
-                    }
-                    players[conn.peer].destroy();
-                    delete players[conn.peer];
-                    delete playerInfo[conn.peer];
-                }
-                delete connections[conn.peer];
-                updatePlayerList();
+                handlePlayerDisconnect(conn.peer);
             });
+        }
+
+        function handlePlayerUpdate(peerId, data) {
+            if (!players[peerId]) {
+                players[peerId] = gameInstance.scene.scenes[0].physics.add.sprite(
+                    data.x,
+                    data.y,
+                    'player'
+                );
+                playerInfo[peerId] = data.playerInfo;
+                players[peerId].setTint(data.playerInfo.color);
+                
+                const nameText = gameInstance.scene.scenes[0].add.text(
+                    data.x,
+                    data.y - 40,
+                    `${data.playerInfo.name} (${data.playerInfo.score})`,
+                    { fontSize: '16px', fill: '#fff' }
+                );
+                players[peerId].nameText = nameText;
+                
+                // Add collision with local player
+                gameInstance.scene.scenes[0].physics.add.collider(
+                    localPlayer,
+                    players[peerId]
+                );
+                
+                updatePlayerList();
+            } else {
+                players[peerId].x = data.x;
+                players[peerId].y = data.y;
+                if (players[peerId].nameText) {
+                    players[peerId].nameText.x = data.x - players[peerId].nameText.width / 2;
+                    players[peerId].nameText.y = data.y - 40;
+                }
+            }
+        }
+
+        function handleRemoteShot(data) {
+            const bullet = bullets.create(data.x, data.y, 'bullet');
+            bullet.setTint(data.color);
+            bullet.owner = data.owner;
+            
+            const speed = 500;
+            bullet.setVelocity(
+                Math.cos(data.angle) * speed,
+                Math.sin(data.angle) * speed
+            );
+
+            setTimeout(() => {
+                bullet.destroy();
+            }, 1000);
+        }
+
+        function handleHit(data) {
+            if (data.target === playerId) {
+                // Player got hit
+                localPlayer.x = Math.random() * 700 + 50;
+                localPlayer.y = Math.random() * 500 + 50;
+                
+                // Update shooter's score
+                if (playerInfo[data.shooter]) {
+                    playerInfo[data.shooter].score++;
+                    updatePlayerList();
+                }
+            }
+        }
+
+        function handlePlayerDisconnect(peerId) {
+            if (players[peerId]) {
+                if (players[peerId].nameText) {
+                    players[peerId].nameText.destroy();
+                }
+                players[peerId].destroy();
+                delete players[peerId];
+                delete playerInfo[peerId];
+            }
+            delete connections[peerId];
+            updatePlayerList();
         }
 
         function update() {
             if (!localPlayer) return;
 
-            let moved = false;
-
             // Handle movement
-            if (this.cursors.left.isDown) {
-                localPlayer.x -= 4;
-                moved = true;
-            }
-            if (this.cursors.right.isDown) {
-                localPlayer.x += 4;
-                moved = true;
-            }
-            if (this.cursors.up.isDown) {
-                localPlayer.y -= 4;
-                moved = true;
-            }
-            if (this.cursors.down.isDown) {
-                localPlayer.y += 4;
-                moved = true;
-            }
+            const speed = 200;
+            let velocity = new Phaser.Math.Vector2(0, 0);
+
+            if (keys.left.isDown) velocity.x = -speed;
+            if (keys.right.isDown) velocity.x = speed;
+            if (keys.up.isDown) velocity.y = -speed;
+            if (keys.down.isDown) velocity.y = speed;
+
+            // Normalize diagonal movement
+            velocity.normalize();
+            velocity.scale(speed);
+
+            localPlayer.setVelocity(velocity.x, velocity.y);
+
+            // Rotate player towards mouse
+            const pointer = this.input.activePointer;
+            localPlayer.rotation = Phaser.Math.Angle.Between(
+                localPlayer.x, localPlayer.y,
+                pointer.x, pointer.y
+            );
 
             // Update name text position
             if (playerNameText) {
                 playerNameText.x = localPlayer.x - playerNameText.width / 2;
                 playerNameText.y = localPlayer.y - 40;
+                playerNameText.setText(`${playerName} (${playerInfo[playerId].score})`);
             }
 
-            // Send position updates to all connected peers
-            if (moved) {
-                const positionData = {
+            // Handle reload
+            if (keys.reload.isDown && !isReloading) {
+                reload();
+            }
+
+            // Check for bullet collisions
+            this.physics.overlap(localPlayer, bullets, (player, bullet) => {
+                if (bullet.owner !== playerId) {
+                    bullet.destroy();
+                    
+                    // Notify all peers about the hit
+                    Object.values(connections).forEach(conn => {
+                        conn.send({
+                            type: 'hit',
+                            target: playerId,
+                            shooter: bullet.owner
+                        });
+                    });
+
+                    // Update position
+                    localPlayer.x = Math.random() * 700 + 50;
+                    localPlayer.y = Math.random() * 500 + 50;
+                    
+                    // Update shooter's score
+                    if (playerInfo[bullet.owner]) {
+                        playerInfo[bullet.owner].score++;
+                        updatePlayerList();
+                    }
+                }
+            });
+
+            // Send position updates
+            Object.values(connections).forEach(conn => {
+                conn.send({
                     type: 'position',
                     x: localPlayer.x,
                     y: localPlayer.y,
                     playerInfo: playerInfo[playerId]
-                };
-                
-                Object.values(connections).forEach(conn => {
-                    conn.send(positionData);
                 });
-            }
+            });
         }
 
         function updatePlayerList() {
             const playerListContent = document.getElementById('playerListContent');
             playerListContent.innerHTML = '';
             
-            Object.entries(playerInfo).forEach(([id, info]) => {
-                const playerDiv = document.createElement('div');
-                playerDiv.style.color = '#' + info.color.toString(16).padStart(6, '0');
-                playerDiv.textContent = info.name;
-                playerListContent.appendChild(playerDiv);
-            });
+            Object.entries(playerInfo)
+                .sort((a, b) => b[1].score - a[1].score) // Sort by score
+                .forEach(([id, info]) => {
+                    const playerDiv = document.createElement('div');
+                    playerDiv.style.color = '#' + info.color.toString(16).padStart(6, '0');
+                    playerDiv.textContent = `${info.name}: ${info.score}`;
+                    playerListContent.appendChild(playerDiv);
+                });
         }
 
-        // Add share link functionality
+        function updateAmmoCount() {
+            const ammoDiv = document.getElementById('ammoCount');
+            ammoDiv.textContent = isReloading ? 
+                'Reloading...' : 
+                `Ammo: ${ammoCount}/6`;
+        }
+
         peer.on('open', (id) => {
             const gameUrl = `${window.location.href.split('?')[0]}?join=${id}`;
             console.log('Share this link to play:', gameUrl);
