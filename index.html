@@ -1,87 +1,161 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Los Vaguitos Matrix Animation</title>
-  <style>
-    body {
-      margin: 0;
-      overflow: hidden;
-      background-color: #141414;
-    }
-    @font-face {
-      font-family: 'SerifFont';
-      src: url('path/to/serif-font.woff2') format('woff2');
-    }
-  </style>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.4.0/p5.js"></script>
-  <script>
-    let matrixSymbols = [];
-    let textGraphics;
-    let font;
-
-    function setup() {
-      createCanvas(windowWidth, windowHeight);
-      textGraphics = createGraphics(width, height);
-      textGraphics.textAlign(CENTER, CENTER);
-      textGraphics.textSize(80);
-      textGraphics.textFont('Georgia'); // Set serif font
-
-      // Initialize matrix symbols
-      for (let i = 0; i < width / 20; i++) {
-        matrixSymbols.push(new MatrixSymbol(i * 20, random(-500, 0)));
-      }
-    }
-
-    function windowResized() {
-      resizeCanvas(windowWidth, windowHeight);
-    }
-
-    function draw() {
-      background(20);
-
-      // Draw matrix symbols
-      for (let symbol of matrixSymbols) {
-        symbol.update();
-        symbol.display();
-      }
-
-      // Create gradient text
-      textGraphics.clear();
-      for (let y = 0; y < textGraphics.height; y++) {
-        let inter = map(y, 0, textGraphics.height, 0, 1);
-        let c = lerpColor(color(255, 215, 0), color(218, 165, 32), inter);
-        textGraphics.fill(c);
-        textGraphics.text("Los Vaguitos", textGraphics.width / 2, textGraphics.height / 2);
-      }
-      image(textGraphics, 0, 0, width, height); // Resize text graphics to fit the canvas
-    }
-
-    class MatrixSymbol {
-      constructor(x, y) {
-        this.x = x;
-        this.y = y;
-        this.value;
-        this.switchInterval = round(random(2, 20));
-        this.speed = random(2, 5);
-      }
-
-      update() {
-        if (frameCount % this.switchInterval === 0) {
-          this.value = String.fromCharCode(0x30A0 + round(random(0, 96)));
-        }
-        this.y = (this.y >= height) ? 0 : this.y += this.speed;
-      }
-
-      display() {
-        fill(0, 255, 70);
-        textSize(20);
-        text(this.value, this.x, this.y);
-      }
-    }
-  </script>
+    <title>P2P Multiplayer Game</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/phaser/3.70.0/phaser.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.5.2/peerjs.min.js"></script>
 </head>
 <body>
+    <div id="game"></div>
+    <script>
+        const config = {
+            type: Phaser.AUTO,
+            parent: 'game',
+            width: 800,
+            height: 600,
+            physics: {
+                default: 'arcade',
+                arcade: {
+                    debug: false
+                }
+            },
+            scene: {
+                preload: preload,
+                create: create,
+                update: update
+            }
+        };
+
+        const game = new Phaser.Game(config);
+        let peer;
+        let connections = {};
+        let players = {};
+        let localPlayer;
+        let playerId;
+
+        function preload() {
+            // Create a simple colored rectangle as player sprite
+            this.load.image('player', 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAABHNCSVQICAgIfAhkiAAAAAlwSFlzAAAA7AAAAOwBeShxvQAAABl0RVh0U29mdHdhcmUAd3d3Lmlua3NjYXBlLm9yZ5vuPBoAAABQSURBVFiF7dexDcBADANB5Qp7ZP/hrMJZhV2E4AJu8NxJ9WZWJ3W5R1YXEZGZc0rlvZ93zKx5/j0AAAAAAAAAAAAAAAAAAAAAAADwmwMAAP//jdQCARuh6ZUAAAAASUVORK5CYII=');
+        }
+
+        function create() {
+            // Initialize PeerJS
+            peer = new Peer();
+            
+            peer.on('open', (id) => {
+                playerId = id;
+                console.log('My peer ID is: ' + id);
+                
+                // Create local player
+                localPlayer = this.add.sprite(
+                    Math.random() * 700 + 50,
+                    Math.random() * 500 + 50,
+                    'player'
+                );
+                localPlayer.setTint(0xff0000);  // Red tint for local player
+                
+                players[playerId] = localPlayer;
+
+                // Handle new connections
+                peer.on('connection', (conn) => {
+                    handleConnection(conn);
+                });
+            });
+
+            // Join game by connecting to another peer
+            const urlParams = new URLSearchParams(window.location.search);
+            const joinId = urlParams.get('join');
+            if (joinId) {
+                const conn = peer.connect(joinId);
+                handleConnection(conn);
+            }
+
+            // Set up keyboard controls
+            this.cursors = this.input.keyboard.createCursorKeys();
+        }
+
+        function handleConnection(conn) {
+            connections[conn.peer] = conn;
+            
+            // Send initial position
+            conn.on('open', () => {
+                conn.send({
+                    type: 'position',
+                    x: localPlayer.x,
+                    y: localPlayer.y
+                });
+            });
+
+            // Handle incoming data
+            conn.on('data', (data) => {
+                if (data.type === 'position') {
+                    // Create or update other player
+                    if (!players[conn.peer]) {
+                        players[conn.peer] = game.scene.scenes[0].add.sprite(
+                            data.x,
+                            data.y,
+                            'player'
+                        );
+                        players[conn.peer].setTint(0x00ff00);  // Green tint for other players
+                    } else {
+                        players[conn.peer].x = data.x;
+                        players[conn.peer].y = data.y;
+                    }
+                }
+            });
+
+            // Handle disconnection
+            conn.on('close', () => {
+                if (players[conn.peer]) {
+                    players[conn.peer].destroy();
+                    delete players[conn.peer];
+                }
+                delete connections[conn.peer];
+            });
+        }
+
+        function update() {
+            if (!localPlayer) return;
+
+            let moved = false;
+
+            // Handle movement
+            if (this.cursors.left.isDown) {
+                localPlayer.x -= 4;
+                moved = true;
+            }
+            if (this.cursors.right.isDown) {
+                localPlayer.x += 4;
+                moved = true;
+            }
+            if (this.cursors.up.isDown) {
+                localPlayer.y -= 4;
+                moved = true;
+            }
+            if (this.cursors.down.isDown) {
+                localPlayer.y += 4;
+                moved = true;
+            }
+
+            // Send position updates to all connected peers
+            if (moved) {
+                const positionData = {
+                    type: 'position',
+                    x: localPlayer.x,
+                    y: localPlayer.y
+                };
+                
+                Object.values(connections).forEach(conn => {
+                    conn.send(positionData);
+                });
+            }
+        }
+
+        // Add share link functionality
+        peer.on('open', (id) => {
+            const gameUrl = `${window.location.href.split('?')[0]}?join=${id}`;
+            console.log('Share this link to play:', gameUrl);
+        });
+    </script>
 </body>
 </html>
