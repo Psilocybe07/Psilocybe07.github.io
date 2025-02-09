@@ -4,7 +4,55 @@
     <title>P2P Combat Game</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/phaser/3.70.0/phaser.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.5.2/peerjs.min.js"></script>
-    <!-- Add your styles here -->
+    <style>
+        body { margin: 0; background: #333; }
+        #loginScreen {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            text-align: center;
+        }
+        #playerList {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background: rgba(0, 0, 0, 0.7);
+            color: white;
+            padding: 10px;
+            border-radius: 5px;
+            font-family: Arial, sans-serif;
+            min-width: 150px;
+        }
+        #ammoCount {
+            position: absolute;
+            bottom: 10px;
+            right: 10px;
+            background: rgba(0, 0, 0, 0.7);
+            color: white;
+            padding: 10px;
+            border-radius: 5px;
+            font-family: Arial, sans-serif;
+        }
+        input, button {
+            margin: 5px;
+            padding: 8px;
+            border-radius: 4px;
+            border: 1px solid #ccc;
+        }
+        button {
+            background: #4CAF50;
+            color: white;
+            border: none;
+            cursor: pointer;
+        }
+        button:hover {
+            background: #45a049;
+        }
+    </style>
 </head>
 <body>
     <div id="loginScreen">
@@ -12,7 +60,6 @@
         <input type="text" id="playerName" placeholder="Enter your name" maxlength="15">
         <button onclick="startGame()">Join Game</button>
     </div>
-    <div id="gameStats">FPS: 60<br>Ping: 0ms</div>
     <div id="playerList">
         <h3>Players Online</h3>
         <div id="playerListContent"></div>
@@ -21,57 +68,19 @@
     <div id="game"></div>
 
     <script>
-        // Configuration and constants
-        const RENDER_DISTANCE = 600;
-        const UPDATE_INTERVAL = 100; // ms between position updates
-        const BULLET_POOL_SIZE = 20;
-        const BULLET_SPEED = 500;
-        const PLAYER_SPEED = 200;
-        const INTERPOLATION_FACTOR = 0.3;
-
-        // Game state variables
         let gameInstance = null;
-        let peer;
-        let connections = {};
-        let players = {};
-        let playerInfo = {};
-        let localPlayer;
-        let playerId;
         let playerName = '';
-        let bullets;
-        let ammoCount = 6;
-        let isReloading = false;
-        let lastShootTime = 0;
-        let lastUpdateTime = 0;
-        let lastFpsUpdate = 0;
-        let keys;
-        let fpsText;
-        let pingText;
-        let pingStartTime;
-
-        // Interpolation state
-        const interpolationStates = {};
-
-        class Player extends Phaser.Physics.Arcade.Sprite {
-            constructor(scene, x, y) {
-                super(scene, x, y, 'player');
-                this.targetX = x;
-                this.targetY = y;
-                this.nameText = null;
-                this.lastUpdate = Date.now();
+        const playerColors = [0xff0000, 0x00ff00, 0x0000ff, 0xff00ff, 0xffff00, 0x00ffff];
+        
+        function startGame() {
+            playerName = document.getElementById('playerName').value.trim();
+            if (!playerName) {
+                alert('Please enter a name!');
+                return;
             }
-
-            updateInterpolation(delta) {
-                if (this !== localPlayer) {
-                    this.x += (this.targetX - this.x) * INTERPOLATION_FACTOR;
-                    this.y += (this.targetY - this.y) * INTERPOLATION_FACTOR;
-
-                    if (this.nameText) {
-                        this.nameText.x = this.x - this.nameText.width / 2;
-                        this.nameText.y = this.y - 40;
-                    }
-                }
-            }
+            
+            document.getElementById('loginScreen').style.display = 'none';
+            initGame();
         }
 
         function initGame() {
@@ -84,8 +93,7 @@
                 physics: {
                     default: 'arcade',
                     arcade: {
-                        debug: false,
-                        gravity: { x: 0, y: 0 }
+                        debug: false
                     }
                 },
                 scene: {
@@ -98,59 +106,81 @@
             gameInstance = new Phaser.Game(config);
         }
 
+        let peer;
+        let connections = {};
+        let players = {};
+        let playerInfo = {};
+        let localPlayer;
+        let playerId;
+        let playerNameText;
+        let bullets;
+        let ammoCount = 6;
+        let isReloading = false;
+        let lastShootTime = 0;
+        let keys;
+
         function preload() {
-            // Optimize asset loading
-            this.load.crossOrigin = 'anonymous';
-
-            const graphics = this.add.graphics();
-
             // Create player sprite
-            graphics.clear();
+            const graphics = this.add.graphics();
             graphics.lineStyle(2, 0xffffff);
             graphics.fillStyle(0xffffff);
-            graphics.fillCircle(16, 16, 15);
-            graphics.strokeCircle(16, 16, 15);
-            graphics.generateTexture('player', 32, 32);
-
+            graphics.fillCircle(25, 25, 20);
+            graphics.strokeCircle(25, 25, 20);
+            graphics.generateTexture('player', 50, 50);
+            
             // Create bullet sprite
             graphics.clear();
             graphics.fillStyle(0xffffff);
-            graphics.fillCircle(2, 2, 2);
-            graphics.generateTexture('bullet', 4, 4);
-
+            graphics.fillCircle(4, 4, 4);
+            graphics.generateTexture('bullet', 8, 8);
             graphics.destroy();
         }
 
         function create() {
-            // Initialize bullet pool with physics
-            bullets = this.physics.add.group({
-                classType: Phaser.Physics.Arcade.Sprite,
-                defaultKey: 'bullet',
-                maxSize: BULLET_POOL_SIZE,
-                runChildUpdate: true,
-                collideWorldBounds: true
-            });
-
-            // Pre-create bullet pool
-            for (let i = 0; i < BULLET_POOL_SIZE; i++) {
-                const bullet = bullets.create(0, 0, 'bullet');
-                bullet.setActive(false).setVisible(false);
-                bullet.body.setSize(4, 4);
-            }
-
+            // Initialize bullets group
+            bullets = this.physics.add.group();
+            
             // Initialize PeerJS
-            peer = new Peer({
-                config: {
-                    'iceServers': [
-                        { urls: 'stun:stun.l.google.com:19302' }
-                    ]
-                }
+            peer = new Peer();
+            
+            peer.on('open', (id) => {
+                playerId = id;
+                console.log('My peer ID is: ' + id);
+                
+                const playerColor = playerColors[Math.floor(Math.random() * playerColors.length)];
+                
+                // Create local player with physics
+                localPlayer = this.physics.add.sprite(
+                    Math.random() * 700 + 50,
+                    Math.random() * 500 + 50,
+                    'player'
+                );
+                localPlayer.setCollideWorldBounds(true);
+                localPlayer.setTint(playerColor);
+                
+                playerNameText = this.add.text(
+                    localPlayer.x,
+                    localPlayer.y - 40,
+                    `${playerName} (0)`,
+                    { fontSize: '16px', fill: '#fff' }
+                );
+
+                players[playerId] = localPlayer;
+                playerInfo[playerId] = {
+                    name: playerName,
+                    color: playerColor,
+                    score: 0
+                };
+
+                updatePlayerList();
+                updateAmmoCount();
+
+                peer.on('connection', (conn) => {
+                    handleConnection(conn);
+                });
             });
 
-            peer.on('open', initializePlayer);
-            peer.on('connection', handleConnection);
-
-            // Set up input
+            // Set up keyboard controls
             keys = this.input.keyboard.addKeys({
                 up: 'W',
                 down: 'S',
@@ -159,253 +189,279 @@
                 reload: 'R'
             });
 
-            // Optimize mouse input
-            this.input.on('pointerdown', shoot);
+            // Handle mouse click for shooting
+            this.input.on('pointerdown', (pointer) => {
+                shoot(pointer);
+            });
 
-            // Join existing game if URL has join parameter
+            // Join existing game
             const urlParams = new URLSearchParams(window.location.search);
             const joinId = urlParams.get('join');
             if (joinId) {
                 const conn = peer.connect(joinId);
                 handleConnection(conn);
             }
-
-            // Start performance monitoring
-            this.time.addEvent({
-                delay: 1000,
-                callback: updatePerformanceStats,
-                loop: true
-            });
         }
 
-        function initializePlayer(id) {
-            playerId = id;
-            const playerColor = Math.random() * 0xffffff;
-
-            localPlayer = players[playerId] = new Player(
-                gameInstance.scene.scenes[0],
-                Math.random() * 700 + 50,
-                Math.random() * 500 + 50
-            );
-
-            gameInstance.scene.scenes[0].add.existing(localPlayer);
-            gameInstance.scene.scenes[0].physics.add.existing(localPlayer);
-
-            localPlayer.setCollideWorldBounds(true)
-                      .setTint(playerColor)
-                      .setDrag(0.95);
-
-            playerInfo[playerId] = {
-                name: playerName,
-                color: playerColor,
-                score: 0
-            };
-
-            updatePlayerList();
-            updateAmmoCount();
-
-            const gameUrl = `${window.location.href.split('?')[0]}?join=${id}`;
-            console.log('Share this link to play:', gameUrl);
-        }
-
-        function update(time, delta) {
-            if (!localPlayer) return;
-
-            // Handle movement with momentum
-            const velocity = new Phaser.Math.Vector2(0, 0);
-            if (keys.left.isDown) velocity.x = -PLAYER_SPEED;
-            if (keys.right.isDown) velocity.x = PLAYER_SPEED;
-            if (keys.up.isDown) velocity.y = -PLAYER_SPEED;
-            if (keys.down.isDown) velocity.y = PLAYER_SPEED;
-
-            if (velocity.length() > 0) {
-                velocity.normalize().scale(PLAYER_SPEED);
-                localPlayer.setVelocity(velocity.x, velocity.y);
-            }
-
-            // Update all players' interpolation
-            Object.values(players).forEach(player => {
-                player.updateInterpolation(delta);
-            });
-
-            // Update positions for network players if enough time has passed
-            if (time - lastUpdateTime > UPDATE_INTERVAL) {
-                sendPositionUpdates();
-                lastUpdateTime = time;
-            }
-
-            // Cleanup inactive bullets
-            bullets.getChildren().forEach(bullet => {
-                if (bullet.active && (
-                    bullet.x < 0 || bullet.x > 800 ||
-                    bullet.y < 0 || bullet.y > 600
-                )) {
-                    bullet.setActive(false).setVisible(false);
-                }
-            });
-
-            // Update bullets collision
-            this.physics.overlap(players[playerId], bullets, handleBulletHit);
-        }
-
-        // Network Functions
-        function handleConnection(conn) {
-            connections[conn.peer] = conn;
-
-            conn.on('open', () => {
-                sendPlayerState(conn);
-                startPingInterval(conn);
-            });
-
-            conn.on('data', handleNetworkData);
-            conn.on('close', () => handlePlayerDisconnect(conn.peer));
-        }
-
-        function handleNetworkData(data) {
-            switch (data.type) {
-                case 'ping':
-                    handlePing(data);
-                    break;
-                case 'state':
-                    handlePlayerState(data);
-                    break;
-                case 'shoot':
-                    handleRemoteShot(data);
-                    break;
-                case 'hit':
-                    handleHit(data);
-                    break;
-            }
-        }
-
-        function handlePlayerState(data) {
-            const peerId = data.id;
-            if (peerId === playerId) return;
-
-            if (!players[peerId]) {
-                createRemotePlayer(data);
-            } else {
-                updateRemotePlayer(peerId, data);
-            }
-        }
-
-        function sendPositionUpdates() {
-            const state = {
-                type: 'state',
-                id: playerId,
-                x: localPlayer.x,
-                y: localPlayer.y,
-                vx: localPlayer.body.velocity.x,
-                vy: localPlayer.body.velocity.y,
-                playerInfo: playerInfo[playerId]
-            };
-
-            Object.entries(connections).forEach(([peerId, conn]) => {
-                const otherPlayer = players[peerId];
-                if (!otherPlayer) return;
-
-                const distance = Phaser.Math.Distance.Between(
-                    localPlayer.x, localPlayer.y,
-                    otherPlayer.x, otherPlayer.y
-                );
-
-                if (distance < RENDER_DISTANCE) {
-                    conn.send(state);
-                }
-            });
-        }
-
-        // Game Logic Functions
         function shoot(pointer) {
             if (!localPlayer || ammoCount <= 0 || isReloading) return;
-
+            
             const currentTime = Date.now();
-            if (currentTime - lastShootTime < 250) return;
+            if (currentTime - lastShootTime < 250) return; // Rate limiting
             lastShootTime = currentTime;
-
-            const bullet = bullets.get(localPlayer.x, localPlayer.y);
-            if (!bullet) return;
-
-            bullet.setActive(true)
-                 .setVisible(true)
-                 .setTint(playerInfo[playerId].color);
-
-            bullet.owner = playerId;
 
             const angle = Phaser.Math.Angle.Between(
                 localPlayer.x, localPlayer.y,
                 pointer.x, pointer.y
             );
 
+            const bullet = bullets.create(localPlayer.x, localPlayer.y, 'bullet');
+            bullet.setTint(playerInfo[playerId].color);
+            bullet.owner = playerId;
+            
+            const speed = 500;
             bullet.setVelocity(
-                Math.cos(angle) * BULLET_SPEED,
-                Math.sin(angle) * BULLET_SPEED
+                Math.cos(angle) * speed,
+                Math.sin(angle) * speed
             );
 
-            broadcastShot(angle);
+            // Broadcast bullet creation
+            Object.values(connections).forEach(conn => {
+                conn.send({
+                    type: 'shoot',
+                    x: localPlayer.x,
+                    y: localPlayer.y,
+                    angle: angle,
+                    color: playerInfo[playerId].color,
+                    owner: playerId
+                });
+            });
 
             ammoCount--;
             updateAmmoCount();
 
-            gameInstance.scene.scenes[0].time.delayedCall(1000, () => {
-                bullet.setActive(false).setVisible(false);
-            });
+            // Destroy bullet after 1 second
+            setTimeout(() => {
+                bullet.destroy();
+            }, 1000);
         }
 
-        function broadcastShot(angle) {
-            Object.entries(connections).forEach(([peerId, conn]) => {
-                const otherPlayer = players[peerId];
-                if (!otherPlayer) return;
+        function reload() {
+            if (isReloading || ammoCount === 6) return;
+            
+            isReloading = true;
+            setTimeout(() => {
+                ammoCount = 6;
+                isReloading = false;
+                updateAmmoCount();
+            }, 1500); // 1.5 second reload time
+        }
 
-                const distance = Phaser.Math.Distance.Between(
-                    localPlayer.x, localPlayer.y,
-                    otherPlayer.x, otherPlayer.y
-                );
+        function handleConnection(conn) {
+            connections[conn.peer] = conn;
+            
+            conn.on('open', () => {
+                conn.send({
+                    type: 'initial',
+                    id: playerId,
+                    x: localPlayer.x,
+                    y: localPlayer.y,
+                    playerInfo: playerInfo[playerId]
+                });
+            });
 
-                if (distance < RENDER_DISTANCE) {
-                    conn.send({
-                        type: 'shoot',
-                        x: localPlayer.x,
-                        y: localPlayer.y,
-                        angle: angle,
-                        color: playerInfo[playerId].color,
-                        owner: playerId
-                    });
+            conn.on('data', (data) => {
+                if (data.type === 'initial' || data.type === 'position') {
+                    handlePlayerUpdate(conn.peer, data);
+                } else if (data.type === 'shoot') {
+                    handleRemoteShot(data);
+                } else if (data.type === 'hit') {
+                    handleHit(data);
                 }
             });
+
+            conn.on('close', () => {
+                handlePlayerDisconnect(conn.peer);
+            });
         }
 
-        // UI Update Functions
-        function updatePerformanceStats() {
-            if (!gameInstance) return;
-
-            const fps = Math.round(gameInstance.loop.actualFps);
-            const avgPing = calculateAveragePing();
-
-            document.getElementById('gameStats').innerHTML =
-                `FPS: ${fps}<br>Ping: ${avgPing}ms`;
+        function handlePlayerUpdate(peerId, data) {
+            if (!players[peerId]) {
+                players[peerId] = gameInstance.scene.scenes[0].physics.add.sprite(
+                    data.x,
+                    data.y,
+                    'player'
+                );
+                playerInfo[peerId] = data.playerInfo;
+                players[peerId].setTint(data.playerInfo.color);
+                
+                const nameText = gameInstance.scene.scenes[0].add.text(
+                    data.x,
+                    data.y - 40,
+                    `${data.playerInfo.name} (${data.playerInfo.score})`,
+                    { fontSize: '16px', fill: '#fff' }
+                );
+                players[peerId].nameText = nameText;
+                
+                // Add collision with local player
+                gameInstance.scene.scenes[0].physics.add.collider(
+                    localPlayer,
+                    players[peerId]
+                );
+                
+                updatePlayerList();
+            } else {
+                players[peerId].x = data.x;
+                players[peerId].y = data.y;
+                if (players[peerId].nameText) {
+                    players[peerId].nameText.x = data.x - players[peerId].nameText.width / 2;
+                    players[peerId].nameText.y = data.y - 40;
+                }
+            }
         }
 
-        function calculateAveragePing() {
-            const pings = Object.values(connections)
-                .map(conn => conn.pingTime || 0)
-                .filter(ping => ping > 0);
+        function handleRemoteShot(data) {
+            const bullet = bullets.create(data.x, data.y, 'bullet');
+            bullet.setTint(data.color);
+            bullet.owner = data.owner;
+            
+            const speed = 500;
+            bullet.setVelocity(
+                Math.cos(data.angle) * speed,
+                Math.sin(data.angle) * speed
+            );
 
-            return pings.length > 0 ?
-                Math.round(pings.reduce((a, b) => a + b) / pings.length) : 0;
+            setTimeout(() => {
+                bullet.destroy();
+            }, 1000);
         }
 
-        // Initialize the game when player enters name
-        function startGame() {
-            playerName = document.getElementById('playerName').value.trim();
-            if (!playerName) {
-                alert('Please enter a name!');
-                return;
+        function handleHit(data) {
+            if (data.target === playerId) {
+                // Player got hit
+                localPlayer.x = Math.random() * 700 + 50;
+                localPlayer.y = Math.random() * 500 + 50;
+                
+                // Update shooter's score
+                if (playerInfo[data.shooter]) {
+                    playerInfo[data.shooter].score++;
+                    updatePlayerList();
+                }
+            }
+        }
+
+        function handlePlayerDisconnect(peerId) {
+            if (players[peerId]) {
+                if (players[peerId].nameText) {
+                    players[peerId].nameText.destroy();
+                }
+                players[peerId].destroy();
+                delete players[peerId];
+                delete playerInfo[peerId];
+            }
+            delete connections[peerId];
+            updatePlayerList();
+        }
+
+        function update() {
+            if (!localPlayer) return;
+
+            // Handle movement
+            const speed = 200;
+            let velocity = new Phaser.Math.Vector2(0, 0);
+
+            if (keys.left.isDown) velocity.x = -speed;
+            if (keys.right.isDown) velocity.x = speed;
+            if (keys.up.isDown) velocity.y = -speed;
+            if (keys.down.isDown) velocity.y = speed;
+
+            // Normalize diagonal movement
+            velocity.normalize();
+            velocity.scale(speed);
+
+            localPlayer.setVelocity(velocity.x, velocity.y);
+
+            // Rotate player towards mouse
+            const pointer = this.input.activePointer;
+            localPlayer.rotation = Phaser.Math.Angle.Between(
+                localPlayer.x, localPlayer.y,
+                pointer.x, pointer.y
+            );
+
+            // Update name text position
+            if (playerNameText) {
+                playerNameText.x = localPlayer.x - playerNameText.width / 2;
+                playerNameText.y = localPlayer.y - 40;
+                playerNameText.setText(`${playerName} (${playerInfo[playerId].score})`);
             }
 
-            document.getElementById('loginScreen').style.display = 'none';
-            initGame();
+            // Handle reload
+            if (keys.reload.isDown && !isReloading) {
+                reload();
+            }
+
+            // Check for bullet collisions
+            this.physics.overlap(localPlayer, bullets, (player, bullet) => {
+                if (bullet.owner !== playerId) {
+                    bullet.destroy();
+                    
+                    // Notify all peers about the hit
+                    Object.values(connections).forEach(conn => {
+                        conn.send({
+                            type: 'hit',
+                            target: playerId,
+                            shooter: bullet.owner
+                        });
+                    });
+
+                    // Update position
+                    localPlayer.x = Math.random() * 700 + 50;
+                    localPlayer.y = Math.random() * 500 + 50;
+                    
+                    // Update shooter's score
+                    if (playerInfo[bullet.owner]) {
+                        playerInfo[bullet.owner].score++;
+                        updatePlayerList();
+                    }
+                }
+            });
+
+            // Send position updates
+            Object.values(connections).forEach(conn => {
+                conn.send({
+                    type: 'position',
+                    x: localPlayer.x,
+                    y: localPlayer.y,
+                    playerInfo: playerInfo[playerId]
+                });
+            });
         }
+
+        function updatePlayerList() {
+            const playerListContent = document.getElementById('playerListContent');
+            playerListContent.innerHTML = '';
+            
+            Object.entries(playerInfo)
+                .sort((a, b) => b[1].score - a[1].score) // Sort by score
+                .forEach(([id, info]) => {
+                    const playerDiv = document.createElement('div');
+                    playerDiv.style.color = '#' + info.color.toString(16).padStart(6, '0');
+                    playerDiv.textContent = `${info.name}: ${info.score}`;
+                    playerListContent.appendChild(playerDiv);
+                });
+        }
+
+        function updateAmmoCount() {
+            const ammoDiv = document.getElementById('ammoCount');
+            ammoDiv.textContent = isReloading ? 
+                'Reloading...' : 
+                `Ammo: ${ammoCount}/6`;
+        }
+
+        peer.on('open', (id) => {
+            const gameUrl = `${window.location.href.split('?')[0]}?join=${id}`;
+            console.log('Share this link to play:', gameUrl);
+        });
     </script>
 </body>
 </html>
