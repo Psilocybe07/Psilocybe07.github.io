@@ -11,7 +11,7 @@
             margin: 0;
             padding: 20px;
             display: flex;
-            flex-direction: row;
+            flex-direction: column;
             height: 100vh;
             box-sizing: border-box;
             overflow: hidden;
@@ -22,6 +22,7 @@
             display: flex;
             justify-content: center;
             align-items: center;
+            min-height: 300px; /* Minimum height for canvas container */
         }
         
         #controls {
@@ -31,8 +32,6 @@
             display: flex;
             flex-direction: column;
             gap: 10px;
-            max-width: 300px;
-            min-width: 250px;
             overflow-y: auto;
         }
         
@@ -52,7 +51,7 @@
         
         textarea {
             width: 100%;
-            height: 300px;
+            height: 150px;
             margin-bottom: 10px;
             padding: 8px;
             box-sizing: border-box;
@@ -65,6 +64,22 @@
             font-size: 0.9em;
             color: #666;
             margin-bottom: 10px;
+        }
+        
+        /* Desktop layout */
+        @media (min-width: 768px) {
+            body {
+                flex-direction: row;
+            }
+            
+            #controls {
+                max-width: 300px;
+                min-width: 250px;
+            }
+            
+            textarea {
+                height: 300px;
+            }
         }
     </style>
 </head>
@@ -127,10 +142,12 @@ UK Garage / Bassline</textarea>
         let minSpinSpeed = 0.2;
         let winner = "-";
         let canvasSize = 500; // Initial size
+        let isMobile = false;
 
         // Create the p5 instance
         const sketch = (p) => {
             p.setup = function() {
+                checkMobile();
                 canvasSize = calculateCanvasSize();
                 const canvas = p.createCanvas(canvasSize, canvasSize);
                 canvas.parent('canvas-container');
@@ -138,7 +155,9 @@ UK Garage / Bassline</textarea>
                 // Get initial segments from textarea
                 updateSegmentsFromTextarea();
                 
-                wheel = new Wheel(p.width/2, p.height/2, p.width * 0.4, segments);
+                // Set wheel radius based on device
+                const wheelRadius = getWheelRadius();
+                wheel = new Wheel(p.width/2, p.height/2, wheelRadius, segments);
                 
                 // Event listeners
                 document.getElementById('update-btn').addEventListener('click', updateWheel);
@@ -167,7 +186,14 @@ UK Garage / Bassline</textarea>
                 p.push();
                 p.translate(p.width/2, p.height/2);
                 p.fill(255, 0, 0);
-                p.triangle(wheel.radius + 20, 0, wheel.radius + 40, -10, wheel.radius + 40, 10);
+                
+                // Scale the pointer size for mobile
+                const pointerSize = isMobile ? wheel.radius * 0.15 : wheel.radius * 0.1;
+                p.triangle(
+                    wheel.radius + pointerSize, 0, 
+                    wheel.radius + pointerSize*2, -pointerSize/2, 
+                    wheel.radius + pointerSize*2, pointerSize/2
+                );
                 p.pop();
             };
             
@@ -181,15 +207,35 @@ UK Garage / Bassline</textarea>
             }
             
             function windowResized() {
+                checkMobile();
                 const newSize = calculateCanvasSize();
                 p.resizeCanvas(newSize, newSize);
-                wheel.updatePosition(p.width/2, p.height/2, p.width * 0.4);
+                const wheelRadius = getWheelRadius();
+                wheel.updatePosition(p.width/2, p.height/2, wheelRadius);
             }
             
             function calculateCanvasSize() {
                 const containerWidth = document.getElementById('canvas-container').offsetWidth;
-                const containerHeight = window.innerHeight - 40; // Subtract padding
-                return Math.min(containerWidth, containerHeight);
+                const containerHeight = document.getElementById('canvas-container').offsetHeight;
+                
+                // For mobile, make canvas smaller
+                if (isMobile) {
+                    return Math.min(containerWidth, 300);
+                } else {
+                    return Math.min(containerWidth, containerHeight);
+                }
+            }
+            
+            function getWheelRadius() {
+                if (isMobile) {
+                    return canvasSize * 0.35; // Smaller radius for mobile
+                } else {
+                    return canvasSize * 0.4; // Original radius for desktop
+                }
+            }
+            
+            function checkMobile() {
+                isMobile = window.innerWidth < 768;
             }
         };
 
@@ -302,7 +348,7 @@ UK Garage / Bassline</textarea>
                     
                     p.fill(this.colors[i].r, this.colors[i].g, this.colors[i].b);
                     p.stroke(0);
-                    p.strokeWeight(2);
+                    p.strokeWeight(isMobile ? 1 : 2); // Thinner stroke for mobile
                     
                     p.beginShape();
                     p.vertex(0, 0);
@@ -318,8 +364,8 @@ UK Garage / Bassline</textarea>
                 // Draw center circle
                 p.fill(255);
                 p.stroke(0);
-                p.strokeWeight(2);
-                p.ellipse(0, 0, this.radius * 0.1, this.radius * 0.1);
+                p.strokeWeight(isMobile ? 1 : 2);
+                p.ellipse(0, 0, this.radius * (isMobile ? 0.15 : 0.1), this.radius * (isMobile ? 0.15 : 0.1));
                 
                 p.pop();
             }
@@ -330,8 +376,9 @@ UK Garage / Bassline</textarea>
                 p.fill(color);
                 p.noStroke();
                 
-                // Adjust text size based on segment count and wheel size
-                const scaleFactor = Math.min(1, 12 / this.segments.length);
+                // Adjust text size based on segment count, wheel size, and device
+                const mobileFactor = isMobile ? 0.8 : 1;
+                const scaleFactor = Math.min(1, 12 / this.segments.length) * mobileFactor;
                 p.textSize(this.radius * 0.05 * scaleFactor);
                 p.textAlign(p.CENTER, p.BASELINE);
                 
@@ -339,12 +386,13 @@ UK Garage / Bassline</textarea>
                 const midAngle = startAngle + segmentAngle / 2;
                 
                 // Calculate the starting position for text placement
-                const startRadius = this.radius * 0.25;
-                const endRadius = this.radius * 0.85;
+                // For mobile, keep text closer to the center
+                const startRadius = this.radius * (isMobile ? 0.3 : 0.25);
+                const endRadius = this.radius * (isMobile ? 0.8 : 0.85);
                 
                 // Limit text length based on available space
                 let displayText = text;
-                const maxLength = Math.floor(20 * scaleFactor);
+                const maxLength = Math.floor(isMobile ? 15 * scaleFactor : 20 * scaleFactor);
                 if (text.length > maxLength) {
                     displayText = text.substring(0, maxLength - 2) + '..';
                 }
