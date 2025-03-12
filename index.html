@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Customizable Spinning Wheel</title>
+    <title>Music Genre Spinning Wheel</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.7.0/p5.min.js"></script>
     <style>
         body {
@@ -14,6 +14,7 @@
             flex-direction: row;
             height: 100vh;
             box-sizing: border-box;
+            overflow: hidden;
         }
         
         #canvas-container {
@@ -31,6 +32,8 @@
             flex-direction: column;
             gap: 10px;
             max-width: 300px;
+            min-width: 250px;
+            overflow-y: auto;
         }
         
         button {
@@ -49,12 +52,13 @@
         
         textarea {
             width: 100%;
-            height: 200px;
+            height: 300px;
             margin-bottom: 10px;
             padding: 8px;
             box-sizing: border-box;
             border: 1px solid #ccc;
             border-radius: 4px;
+            font-size: 14px;
         }
         
         .help-text {
@@ -70,12 +74,39 @@
         <h2>Wheel Options</h2>
         
         <p class="help-text">Enter one item per line. These will appear on the wheel segments.</p>
-        <textarea id="items-input">Option 1
-Option 2
-Option 3
-Option 4
-Option 5
-Option 6</textarea>
+        <textarea id="items-input">140 / Deep Dubstep / Grime
+Afro House
+Amapiano
+Bass / Club
+Bass House
+Breaks / Breakbeat / UK Bass
+Dance / Pop
+Deep House
+DJ Tools
+Drum & Bass
+Dubstep
+Electro (Classic / Detroit / Modern)
+Electronica
+Funky House
+Hard Dance / Hardcore / Neo Rave
+Hard Techno
+House
+Indie Dance
+Jackin House
+Mainstage
+Melodic House & Techno
+Minimal / Deep Tech
+Nu Disco / Disco
+Organic House / Downtempo
+Progressive House
+Psy-Trance
+Tech House
+Techno (Peak Time / Driving)
+Techno (Raw / Deep / Hypnotic)
+Trance (Main Floor)
+Trance (Raw / Deep / Hypnotic)
+Trap / Future Bass
+UK Garage / Bassline</textarea>
         
         <button id="update-btn">Update Wheel</button>
         <button id="spin-btn">Spin the Wheel!</button>
@@ -87,7 +118,7 @@ Option 6</textarea>
 
     <script>
         let wheel;
-        let segments = ["Option 1", "Option 2", "Option 3", "Option 4", "Option 5", "Option 6"];
+        let segments = [];
         let angle = 0;
         let spinning = false;
         let targetAngle = 0;
@@ -95,17 +126,24 @@ Option 6</textarea>
         let deceleration = 0.98;
         let minSpinSpeed = 0.2;
         let winner = "-";
+        let canvasSize = 500; // Initial size
 
         // Create the p5 instance
         const sketch = (p) => {
             p.setup = function() {
-                const canvas = p.createCanvas(500, 500);
+                canvasSize = calculateCanvasSize();
+                const canvas = p.createCanvas(canvasSize, canvasSize);
                 canvas.parent('canvas-container');
-                wheel = new Wheel(p.width/2, p.height/2, 200, segments);
+                
+                // Get initial segments from textarea
+                updateSegmentsFromTextarea();
+                
+                wheel = new Wheel(p.width/2, p.height/2, p.width * 0.4, segments);
                 
                 // Event listeners
                 document.getElementById('update-btn').addEventListener('click', updateWheel);
                 document.getElementById('spin-btn').addEventListener('click', startSpin);
+                window.addEventListener('resize', windowResized);
             };
 
             p.draw = function() {
@@ -129,7 +167,7 @@ Option 6</textarea>
                 p.push();
                 p.translate(p.width/2, p.height/2);
                 p.fill(255, 0, 0);
-                p.triangle(220, 0, 240, -10, 240, 10);
+                p.triangle(wheel.radius + 20, 0, wheel.radius + 40, -10, wheel.radius + 40, 10);
                 p.pop();
             };
             
@@ -141,11 +179,27 @@ Option 6</textarea>
                 winner = segments[winnerIndex % segments.length];
                 document.getElementById('result').textContent = winner;
             }
+            
+            function windowResized() {
+                const newSize = calculateCanvasSize();
+                p.resizeCanvas(newSize, newSize);
+                wheel.updatePosition(p.width/2, p.height/2, p.width * 0.4);
+            }
+            
+            function calculateCanvasSize() {
+                const containerWidth = document.getElementById('canvas-container').offsetWidth;
+                const containerHeight = window.innerHeight - 40; // Subtract padding
+                return Math.min(containerWidth, containerHeight);
+            }
         };
 
-        function updateWheel() {
+        function updateSegmentsFromTextarea() {
             const textInput = document.getElementById('items-input').value;
             segments = textInput.split('\n').filter(item => item.trim() !== '');
+        }
+
+        function updateWheel() {
+            updateSegmentsFromTextarea();
             
             if (segments.length < 2) {
                 alert('Please enter at least 2 options');
@@ -176,19 +230,60 @@ Option 6</textarea>
             
             generateColors() {
                 this.colors = [];
+                // Use a good color palette for music genres
+                const baseHues = [200, 160, 300, 35, 260, 10, 60, 180, 330, 220];
+                
                 for (let i = 0; i < this.segments.length; i++) {
-                    // Generate a color with good contrast
+                    const hue = baseHues[i % baseHues.length];
+                    const sat = 70 + Math.floor(Math.random() * 30);
+                    const light = 65 + Math.floor(Math.random() * 20);
+                    
+                    // Convert HSL to RGB for better color distribution
+                    const rgb = this.hslToRgb(hue/360, sat/100, light/100);
+                    
                     this.colors.push({
-                        r: 100 + Math.floor(Math.random() * 155),
-                        g: 100 + Math.floor(Math.random() * 155),
-                        b: 100 + Math.floor(Math.random() * 155)
+                        r: rgb[0],
+                        g: rgb[1],
+                        b: rgb[2]
                     });
                 }
+            }
+            
+            // HSL to RGB conversion for better colors
+            hslToRgb(h, s, l) {
+                let r, g, b;
+
+                if (s === 0) {
+                    r = g = b = l; // achromatic
+                } else {
+                    const hue2rgb = (p, q, t) => {
+                        if (t < 0) t += 1;
+                        if (t > 1) t -= 1;
+                        if (t < 1/6) return p + (q - p) * 6 * t;
+                        if (t < 1/2) return q;
+                        if (t < 2/3) return p + (q - p) * (2/3 - t) * 6;
+                        return p;
+                    };
+
+                    const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+                    const p = 2 * l - q;
+                    r = hue2rgb(p, q, h + 1/3);
+                    g = hue2rgb(p, q, h);
+                    b = hue2rgb(p, q, h - 1/3);
+                }
+
+                return [Math.round(r * 255), Math.round(g * 255), Math.round(b * 255)];
             }
             
             updateSegments(newSegments) {
                 this.segments = newSegments;
                 this.generateColors();
+            }
+            
+            updatePosition(x, y, radius) {
+                this.x = x;
+                this.y = y;
+                this.radius = radius;
             }
             
             display(rotationAngle) {
@@ -216,29 +311,67 @@ Option 6</textarea>
                     }
                     p.endShape(p.CLOSE);
                     
-                    // Draw labels
-                    p.push();
-                    p.rotate(startAngle + segmentAngle / 2);
-                    p.translate(this.radius * 0.7, 0);
-                    p.rotate(Math.PI / 2);
-                    p.fill(0);
-                    p.noStroke();
-                    p.textAlign(p.CENTER, p.MIDDLE);
-                    p.textSize(14);
-                    const displayText = this.segments[i].length > 12 
-                        ? this.segments[i].substring(0, 10) + '..' 
-                        : this.segments[i];
-                    p.text(displayText, 0, 0);
-                    p.pop();
+                    // Draw radial text for each segment
+                    this.drawRadialText(p, this.segments[i], startAngle, segmentAngle);
                 }
                 
                 // Draw center circle
                 p.fill(255);
                 p.stroke(0);
                 p.strokeWeight(2);
-                p.ellipse(0, 0, 20, 20);
+                p.ellipse(0, 0, this.radius * 0.1, this.radius * 0.1);
                 
                 p.pop();
+            }
+            
+            drawRadialText(p, text, startAngle, segmentAngle) {
+                // Determine text color - white for darker backgrounds, black for lighter ones
+                const color = this.getTextColorForSegment(this.segments.indexOf(text));
+                p.fill(color);
+                p.noStroke();
+                
+                // Adjust text size based on segment count and wheel size
+                const scaleFactor = Math.min(1, 12 / this.segments.length);
+                p.textSize(this.radius * 0.05 * scaleFactor);
+                p.textAlign(p.CENTER, p.BASELINE);
+                
+                // Calculate the middle of the segment
+                const midAngle = startAngle + segmentAngle / 2;
+                
+                // Calculate the starting position for text placement
+                const startRadius = this.radius * 0.25;
+                const endRadius = this.radius * 0.85;
+                
+                // Limit text length based on available space
+                let displayText = text;
+                const maxLength = Math.floor(20 * scaleFactor);
+                if (text.length > maxLength) {
+                    displayText = text.substring(0, maxLength - 2) + '..';
+                }
+                
+                for (let i = 0; i < displayText.length; i++) {
+                    // Calculate radius based on character position
+                    const charRadius = startRadius + (endRadius - startRadius) * (i / Math.max(displayText.length - 1, 1));
+                    
+                    p.push();
+                    // Move to the position where the character should be drawn
+                    p.rotate(midAngle);
+                    p.translate(charRadius, 0);
+                    
+                    // Rotate each character to be horizontal (90 degrees from radial)
+                    p.rotate(Math.PI); // 180 degrees so text reads from outside to inside
+                    
+                    // Draw the character
+                    p.text(displayText.charAt(i), 0, 0);
+                    p.pop();
+                }
+            }
+            
+            getTextColorForSegment(index) {
+                // Determine if background color is dark or light
+                const rgb = this.colors[index];
+                const brightness = (rgb.r * 299 + rgb.g * 587 + rgb.b * 114) / 1000;
+                return brightness > 128 ? 0 : 255; // Black for light colors, white for dark
             }
         }
         
